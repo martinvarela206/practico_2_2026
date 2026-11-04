@@ -1,60 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import '../../models/itemproducto.dart';
-
-// Ajusta estas rutas a tu proyecto
+import '../../database/manejador_pedidos.dart';
 import '../../models/pedido.dart';
 import '../../utils/responsive.dart';
 
-class PedidosPage extends StatefulWidget {
+class PedidosPage extends StatelessWidget {
   const PedidosPage({super.key});
-
-  @override
-  State<PedidosPage> createState() => _PedidosPageState();
-}
-
-class _PedidosPageState extends State<PedidosPage> {
-  Future<List<Pedido>> futurePedidos() async {
-    await Future.delayed(const Duration(seconds: 2));
-    return [
-      Pedido(
-        idCliente: '1',
-        nombreCliente: 'Cliente 1',
-        items: [
-          ItemProducto(
-            idProducto: '1',
-            nombreProducto: 'Producto 1',
-            precioUnitario: 135060,
-          ),
-        ],
-        imagen: '',
-        sena: 13506,
-        fechaEntrega: DateTime(2023, 11, 12),
-        fechaEncargo: DateTime.now(),
-        pagoRealizado: false,
-      ),
-    ];
-  }
-
-  Stream<List<Pedido>> getPedidos() async* {
-    yield await futurePedidos();
-  }
 
   @override
   Widget build(BuildContext context) {
     final responsive = Responsive.of(context);
     final theme = Theme.of(context);
+    final manejadorPedidos = context.read<ManejadorPedidos>();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Gestión de Pedidos'), elevation: 0),
       body: SafeArea(
         child: StreamBuilder<List<Pedido>>(
-          stream: getPedidos(),
+          stream: manejadorPedidos.listar(),
           builder: (context, asyncSnapshot) {
             if (asyncSnapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             } else if (asyncSnapshot.hasError) {
-              return _hasError(responsive, theme);
+              return _hasError(responsive, theme, asyncSnapshot.error!);
             } else if (!asyncSnapshot.hasData || asyncSnapshot.data!.isEmpty) {
               return _sinPedidos(responsive, theme);
             }
@@ -117,7 +86,6 @@ class _PedidosPageState extends State<PedidosPage> {
                   color: Colors.red.shade700,
                   pedidos: vencidosImpagos,
                   responsive: responsive,
-                  alVolver: () => setState(() {}),
                 ),
                 _SeccionPedidos(
                   titulo: 'Próximos a Entregar',
@@ -125,7 +93,6 @@ class _PedidosPageState extends State<PedidosPage> {
                   color: Colors.orange.shade700,
                   pedidos: proximos,
                   responsive: responsive,
-                  alVolver: () => setState(() {}),
                 ),
                 _SeccionPedidos(
                   titulo: 'Pedidos Pendientes',
@@ -133,7 +100,6 @@ class _PedidosPageState extends State<PedidosPage> {
                   color: theme.colorScheme.primary,
                   pedidos: pendientes,
                   responsive: responsive,
-                  alVolver: () => setState(() {}),
                 ),
                 _SeccionPedidos(
                   titulo: 'Historial Completado',
@@ -141,7 +107,6 @@ class _PedidosPageState extends State<PedidosPage> {
                   color: Colors.green.shade700,
                   pedidos: historial,
                   responsive: responsive,
-                  alVolver: () => setState(() {}),
                 ),
                 SizedBox(height: responsive.hp(8)),
               ],
@@ -150,10 +115,7 @@ class _PedidosPageState extends State<PedidosPage> {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await Navigator.pushNamed(context, '/nuevo_pedido');
-          if (mounted) setState(() {});
-        },
+        onPressed: () => Navigator.pushNamed(context, '/nuevo_pedido'),
         icon: const Icon(Icons.add_task_rounded),
         label: const Text('Nuevo Pedido'),
         backgroundColor: theme.colorScheme.primary,
@@ -162,7 +124,7 @@ class _PedidosPageState extends State<PedidosPage> {
     );
   }
 
-  Widget _hasError(Responsive responsive, ThemeData theme) {
+  Widget _hasError(Responsive responsive, ThemeData theme, Object error) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -174,7 +136,7 @@ class _PedidosPageState extends State<PedidosPage> {
           ),
           SizedBox(height: responsive.hp(2)),
           Text(
-            'Error al cargar pedidos',
+            'Error al cargar pedidos: $error',
             style: TextStyle(color: theme.colorScheme.error),
           ),
         ],
@@ -212,7 +174,6 @@ class _SeccionPedidos extends StatelessWidget {
   final Color color;
   final List<Pedido> pedidos;
   final Responsive responsive;
-  final VoidCallback alVolver;
 
   const _SeccionPedidos({
     required this.titulo,
@@ -220,7 +181,6 @@ class _SeccionPedidos extends StatelessWidget {
     required this.color,
     required this.pedidos,
     required this.responsive,
-    required this.alVolver,
   });
 
   @override
@@ -277,8 +237,7 @@ class _SeccionPedidos extends StatelessWidget {
   }
 
   Iterable<_PedidoTile> _pedidos() => pedidos.map(
-    (pedido) =>
-        _PedidoTile(pedido: pedido, responsive: responsive, alVolver: alVolver),
+    (pedido) => _PedidoTile(pedido: pedido, responsive: responsive),
   );
 }
 
@@ -286,12 +245,10 @@ class _SeccionPedidos extends StatelessWidget {
 class _PedidoTile extends StatelessWidget {
   final Pedido pedido;
   final Responsive responsive;
-  final VoidCallback alVolver;
 
   const _PedidoTile({
     required this.pedido,
     required this.responsive,
-    required this.alVolver,
   });
 
   @override
@@ -314,10 +271,7 @@ class _PedidoTile extends StatelessWidget {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(responsive.dp(1.5)),
-        onTap: () async {
-          await Navigator.pushNamed(context, '/pedido', arguments: pedido);
-          alVolver();
-        },
+        onTap: () => Navigator.pushNamed(context, '/pedido', arguments: pedido),
         child: Padding(
           padding: EdgeInsets.all(responsive.wp(3)),
           child: Column(

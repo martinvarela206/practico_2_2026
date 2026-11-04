@@ -35,3 +35,21 @@
 - **Archivo modificado:** `android/gradle.properties`
 - **Valor original:** *(No existía, por defecto Kotlin compila de forma incremental)*
 - **Nuevo valor:** `kotlin.incremental=false`
+
+
+## CRUD Pedidos
+- Manejador de pedidos: `lib/src/database/manejador_pedidos.dart`
+
+## Error al seleccionar clientes en pedidos
+
+### Causa
+
+Al crear o editar un pedido, `DropdownSearch` utiliza widgets de `material_ui` (incluido `InkResponse`) que buscan un ancestro `Material` de esa misma biblioteca. El `Scaffold` de la pantalla usa el `Material` de Flutter; aunque ambos tienen el mismo nombre y propósito, no satisfacen entre sí esa búsqueda. Por eso se producía la aserción `No Material widget found` al construir el selector de clientes. Además, el campo de búsqueda del menú requiere las localizaciones propias de `material_ui`, que no estaban registradas en la aplicación.
+
+### Cambio realizado
+
+Se envolvió el `DropdownSearch<Cliente>` de las pantallas de nuevo y edición de pedidos con `mui.Material`, y se registró `mui.DefaultMaterialLocalizations.delegate` en `MaterialApp` para el campo de búsqueda del menú. Así el selector y sus elementos interactivos tienen el ancestro y las localizaciones requeridas, manteniendo el comportamiento y la presentación existentes.
+
+### Verificación
+
+Se agregó una prueba de widget que verifica que el selector se construye y abre el menú sin lanzar la aserción. `flutter analyze` pasó. 

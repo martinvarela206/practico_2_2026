@@ -1,11 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-// Ajusta estas rutas a tu proyecto
+import '../../database/manejador_clientes.dart';
+import '../../database/manejador_pedidos.dart';
 import '../../models/pedido.dart';
-import '../../models/cliente.dart';
 import '../../utils/responsive.dart';
 
 class DetallePedidoPage extends StatefulWidget {
@@ -19,31 +20,13 @@ class DetallePedidoPage extends StatefulWidget {
 
 class _DetallePedidoPageState extends State<DetallePedidoPage> {
   late Pedido _pedidoActual;
-  Cliente? _clienteCompleto;
-  bool _isLoading = true;
+  late final Stream<List<Pedido>> _pedidosStream;
 
   @override
   void initState() {
     super.initState();
     _pedidoActual = widget.pedido;
-    _cargarDatosCliente();
-  }
-
-  Future<void> _cargarDatosCliente() async {
-    try {
-      // Logica de READ de Cliente
-      setState(() {
-        _clienteCompleto = Cliente(
-          id: '1',
-          nombre: 'Cliente',
-          telefono: '1111111111',
-        );
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() => _isLoading = false);
-      print('Error al cargar cliente: $e');
-    }
+    _pedidosStream = context.read<ManejadorPedidos>().listar();
   }
 
   // Botón para registrar pagos (totales o parciales)
@@ -114,22 +97,32 @@ class _DetallePedidoPageState extends State<DetallePedidoPage> {
               }
 
               Navigator.pop(ctx);
-
-              // 3. Actualizamos el estado
-              setState(() {
-                // Le sumamos el nuevo pago a la seña que ya existía
-                _pedidoActual.sena += montoIngresado;
-
-                // Si con este pago la diferencia llega a 0, marcamos el flag de finalizado
-                if (_pedidoActual.diferencia <= 0) {
-                  _pedidoActual.pagoRealizado = true;
+              final nuevaSena = _pedidoActual.sena + montoIngresado;
+              final pedidoActualizado = Pedido(
+                id: _pedidoActual.id,
+                idCliente: _pedidoActual.idCliente,
+                nombreCliente: _pedidoActual.nombreCliente,
+                items: _pedidoActual.items,
+                imagen: _pedidoActual.imagen,
+                sena: nuevaSena,
+                fechaEntrega: _pedidoActual.fechaEntrega,
+                fechaEncargo: _pedidoActual.fechaEncargo,
+                pagoRealizado: _pedidoActual.total - nuevaSena <= 0,
+              );
+              try {
+                final actualizado = await context
+                    .read<ManejadorPedidos>()
+                    .actualizar(pedidoActualizado);
+                if (!mounted) return;
+                if (!actualizado) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No se encontró el pedido para actualizar'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
                 }
-              });
-
-              // Guardamos en la base de datos (pasamos null en la imagen porque no la estamos editando)
-              // Completar la logica de Update de Pedido
-
-              if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text(
@@ -139,6 +132,15 @@ class _DetallePedidoPageState extends State<DetallePedidoPage> {
                     backgroundColor: Colors.green,
                   ),
                 );
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('No se pudo registrar el pago: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               }
             },
             child: const Text('Confirmar Pago'),
@@ -173,9 +175,30 @@ class _DetallePedidoPageState extends State<DetallePedidoPage> {
             ),
             onPressed: () async {
               Navigator.pop(ctx); // cierra el alerta
-              //Completar logica de DELETE de Pedido
-              if (mounted) {
-                Navigator.pop(context); // Vuelve a la lista
+              try {
+                final eliminados = await context
+                    .read<ManejadorPedidos>()
+                    .eliminar(_pedidoActual.id ?? '');
+                if (!mounted) return;
+                if (eliminados == 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No se encontró el pedido para eliminar'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+                Navigator.pop(context);
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('No se pudo eliminar el pedido: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               }
             },
             child: const Text('Eliminar'),
@@ -187,42 +210,56 @@ class _DetallePedidoPageState extends State<DetallePedidoPage> {
 
   // WhatsApp
   Future<void> _enviarWhatsApp() async {
-    if (_clienteCompleto == null || _clienteCompleto!.telefono.isEmpty) return;
-
-    final buffer = StringBuffer();
-    buffer.writeln(
-      'Hola *${_pedidoActual.nombreCliente}*, te confirmo los detalles de tu pedido:\n',
-    );
-
-    for (var item in _pedidoActual.items) {
-      buffer.writeln('▪️ ${item.cantidad}x ${item.nombreProducto}');
-    }
-
-    final String fechaE =
-        '${_pedidoActual.fechaEntrega.day}/${_pedidoActual.fechaEntrega.month}/${_pedidoActual.fechaEntrega.year}';
-    buffer.writeln('\n📅 *Fecha de entrega acordada:* $fechaE');
-    buffer.writeln('💰 *Total:* \$${_pedidoActual.total.toStringAsFixed(2)}');
-
-    if (_pedidoActual.diferencia > 0) {
-      buffer.writeln(
-        '⚠️ *Resta abonar:* \$${_pedidoActual.diferencia.toStringAsFixed(2)}',
-      );
-    } else {
-      buffer.writeln('✅ *Estado:* Totalmente abonado.');
-    }
-
-    String numeroLimpio = _clienteCompleto!.telefono.replaceAll(
-      RegExp(r'[^0-9]'),
-      '',
-    );
-    if (!numeroLimpio.startsWith('54')) numeroLimpio = '549$numeroLimpio';
-
-    final Uri url = Uri.parse(
-      'https://wa.me/$numeroLimpio?text=${Uri.encodeComponent(buffer.toString())}',
-    );
     try {
+      final clientes = await context.read<ManejadorClientes>().listar().first;
+      final cliente = clientes
+          .where((cliente) => cliente.id == _pedidoActual.idCliente)
+          .firstOrNull;
+      if (cliente == null || cliente.telefono.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se encontró el teléfono del cliente')),
+          );
+        }
+        return;
+      }
+
+      final buffer = StringBuffer();
+      buffer.writeln(
+        'Hola *${_pedidoActual.nombreCliente}*, te confirmo los detalles de tu pedido:\n',
+      );
+
+      for (var item in _pedidoActual.items) {
+        buffer.writeln('▪️ ${item.cantidad}x ${item.nombreProducto}');
+      }
+
+      final String fechaE =
+          '${_pedidoActual.fechaEntrega.day}/${_pedidoActual.fechaEntrega.month}/${_pedidoActual.fechaEntrega.year}';
+      buffer.writeln('\n📅 *Fecha de entrega acordada:* $fechaE');
+      buffer.writeln('💰 *Total:* \$${_pedidoActual.total.toStringAsFixed(2)}');
+
+      if (_pedidoActual.diferencia > 0) {
+        buffer.writeln(
+          '⚠️ *Resta abonar:* \$${_pedidoActual.diferencia.toStringAsFixed(2)}',
+        );
+      } else {
+        buffer.writeln('✅ *Estado:* Totalmente abonado.');
+      }
+
+      String numeroLimpio = cliente.telefono.replaceAll(RegExp(r'[^0-9]'), '');
+      if (!numeroLimpio.startsWith('54')) numeroLimpio = '549$numeroLimpio';
+
+      final Uri url = Uri.parse(
+        'https://wa.me/$numeroLimpio?text=${Uri.encodeComponent(buffer.toString())}',
+      );
       await launchUrl(url, mode: LaunchMode.externalApplication);
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo abrir WhatsApp: $e')),
+        );
+      }
+    }
   }
 
   // Visualizador de Imagen a Pantalla Completa
@@ -262,18 +299,35 @@ class _DetallePedidoPageState extends State<DetallePedidoPage> {
     final responsive = Responsive.of(context);
     final theme = Theme.of(context);
 
-    if (_isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
+    return StreamBuilder<List<Pedido>>(
+      stream: _pedidosStream,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Detalle de Pedido')),
+            body: Center(child: Text('Error al cargar el pedido: ${snapshot.error}')),
+          );
+        }
+        if (snapshot.hasData) {
+          final pedidoEnDb = snapshot.data!
+              .where((pedido) => pedido.id == widget.pedido.id)
+              .firstOrNull;
+          if (pedidoEnDb == null) {
+            return const Scaffold(
+              body: Center(child: Text('Este pedido ya no existe')),
+            );
+          }
+          _pedidoActual = pedidoEnDb;
+        }
 
-    final String fechaEncargo =
-        '${_pedidoActual.fechaEncargo.day}/${_pedidoActual.fechaEncargo.month}/${_pedidoActual.fechaEncargo.year}';
-    final String fechaEntrega =
-        '${_pedidoActual.fechaEntrega.day}/${_pedidoActual.fechaEntrega.month}/${_pedidoActual.fechaEntrega.year}';
-    final bool estaPagado =
-        _pedidoActual.pagoRealizado || _pedidoActual.diferencia <= 0;
+        final String fechaEncargo =
+            '${_pedidoActual.fechaEncargo.day}/${_pedidoActual.fechaEncargo.month}/${_pedidoActual.fechaEncargo.year}';
+        final String fechaEntrega =
+            '${_pedidoActual.fechaEntrega.day}/${_pedidoActual.fechaEntrega.month}/${_pedidoActual.fechaEntrega.year}';
+        final bool estaPagado =
+            _pedidoActual.pagoRealizado || _pedidoActual.diferencia <= 0;
 
-    return Scaffold(
+        return Scaffold(
       appBar: AppBar(
         title: const Text('Detalle de Pedido'),
         actions: DateTime.now().isBefore(_pedidoActual.fechaEntrega)
@@ -281,18 +335,11 @@ class _DetallePedidoPageState extends State<DetallePedidoPage> {
                 IconButton(
                   icon: const Icon(Icons.edit_note_rounded),
                   onPressed: () async {
-                    final pedidoEditado = await Navigator.pushNamed(
+                    await Navigator.pushNamed(
                       context,
                       '/editar_pedido',
                       arguments: _pedidoActual,
                     );
-
-                    // Si el usuario guardó cambios y la pantalla devolvió el objeto nuevo
-                    if (pedidoEditado != null && pedidoEditado is Pedido) {
-                      setState(() {
-                        _pedidoActual = pedidoEditado;
-                      });
-                    }
                   },
                 ),
                 IconButton(
@@ -322,6 +369,8 @@ class _DetallePedidoPageState extends State<DetallePedidoPage> {
           ],
         ),
       ),
+    );
+      },
     );
   }
 

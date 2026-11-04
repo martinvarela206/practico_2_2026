@@ -4,7 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:material_ui/material_ui.dart' as mui;
 import 'package:dropdown_search/dropdown_search.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 
+import '../../database/manejador_clientes.dart';
+import '../../database/manejador_pedidos.dart';
+import '../../database/manejador_productos.dart';
 import '../../models/itemproducto.dart';
 import '../../models/pedido.dart';
 import '../../models/cliente.dart';
@@ -34,10 +38,14 @@ class _EditarPedidoPageState extends State<EditarPedidoPage> {
   String _imagenActualPath = '';
   File? _nuevaImagenFile;
   final ImagePicker _picker = ImagePicker();
+  late final Stream<List<Cliente>> _clientesStream;
+  late final Stream<List<Producto>> _productosStream;
 
   @override
   void initState() {
     super.initState();
+    _clientesStream = context.read<ManejadorClientes>().listar();
+    _productosStream = context.read<ManejadorProductos>().listar();
 
     _items = widget.pedido.items
         .map(
@@ -147,6 +155,7 @@ class _EditarPedidoPageState extends State<EditarPedidoPage> {
         maxWidth: 800,
       );
 
+      if (!mounted) return;
       if (pickedFile != null) {
         setState(() {
           _nuevaImagenFile = File(pickedFile.path);
@@ -154,9 +163,11 @@ class _EditarPedidoPageState extends State<EditarPedidoPage> {
         });
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error al seleccionar imagen')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al seleccionar imagen: $e')),
+        );
+      }
     }
   }
 
@@ -189,10 +200,31 @@ class _EditarPedidoPageState extends State<EditarPedidoPage> {
 
     setState(() => _isLoading = true);
 
-    // Logica de UPDATE de Pedido
-    if (mounted) {
-      setState(() => _isLoading = false);
-
+    try {
+      final pedidoActualizado = Pedido(
+        id: widget.pedido.id,
+        idCliente: _clienteSeleccionado!.id!,
+        nombreCliente: _clienteSeleccionado!.nombre,
+        items: _items,
+        imagen: _nuevaImagenFile?.path ?? _imagenActualPath,
+        sena: _sena,
+        fechaEntrega: _fechaEntrega,
+        fechaEncargo: _fechaEncargo,
+        pagoRealizado: _diferencia <= 0,
+      );
+      final actualizado = await context.read<ManejadorPedidos>().actualizar(
+        pedidoActualizado,
+      );
+      if (!mounted) return;
+      if (!actualizado) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se encontró el pedido para actualizar'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Cambios guardados con éxito'),
@@ -200,22 +232,18 @@ class _EditarPedidoPageState extends State<EditarPedidoPage> {
         ),
       );
       Navigator.pop(context);
-      //pedidoEditado,
-      //);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudo actualizar el pedido: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  Future<List<Cliente>> futureClientes() async {
-    await Future.delayed(const Duration(seconds: 2));
-    return [
-      Cliente(id: '1', nombre: 'Cliente 1', telefono: '1111111111'),
-      Cliente(id: '2', nombre: 'Cliente 2', telefono: '1111111111'),
-      Cliente(id: '3', nombre: 'Cliente 3', telefono: '1111111111'),
-    ];
-  }
-
-  Stream<List<Cliente>> getClientes() async* {
-    yield await futureClientes();
   }
 
   @override
@@ -237,8 +265,13 @@ class _EditarPedidoPageState extends State<EditarPedidoPage> {
                   children: [
                     // 1. SELECCIÓN DE CLIENTE
                     StreamBuilder<List<Cliente>>(
-                      stream: getClientes(),
+                      stream: _clientesStream,
                       builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return Text(
+                            'Error al cargar clientes: ${snapshot.error}',
+                          );
+                        }
                         if (!snapshot.hasData) {
                           return const LinearProgressIndicator();
                         }
@@ -246,47 +279,47 @@ class _EditarPedidoPageState extends State<EditarPedidoPage> {
                         final clientes = snapshot.data!;
 
                         if (!_inicializado) {
-                          try {
-                            _clienteSeleccionado = clientes.firstWhere(
-                              (c) => c.id == widget.pedido.idCliente,
-                            );
-                          } catch (_) {}
+                          _clienteSeleccionado = clientes
+                              .where((c) => c.id == widget.pedido.idCliente)
+                              .firstOrNull;
                           _inicializado = true;
                         }
 
-                        return DropdownSearch<Cliente>(
-                          items: (filter, s) => clientes,
-                          compareFn: (item1, item2) => item1.id == item2.id,
-                          selectedItem: _clienteSeleccionado,
-                          // Le decimos al paquete qué atributo del objeto debe mostrar en pantalla
-                          itemAsString: (Cliente c) => c.nombre,
-                          // Qué pasa cuando el usuario elige uno
-                          onSelected: (Cliente? item) {
-                            setState(() {
-                              _clienteSeleccionado = item;
-                            });
-                          },
-                          // Configuración de la ventana de búsqueda (Menú desplegable)
-                          popupProps: PopupProps.menu(
-                            showSearchBox: true,
-                            searchFieldProps: const TextFieldProps(
-                              decoration: mui.InputDecoration(
-                                hintText: "Buscar cliente...",
-                                prefixIcon: Icon(Icons.search),
+                        return mui.Material(
+                          child: DropdownSearch<Cliente>(
+                            items: (filter, s) => clientes,
+                            compareFn: (item1, item2) => item1.id == item2.id,
+                            selectedItem: _clienteSeleccionado,
+                            // Le decimos al paquete qué atributo del objeto debe mostrar en pantalla
+                            itemAsString: (Cliente c) => c.nombre,
+                            // Qué pasa cuando el usuario elige uno
+                            onSelected: (Cliente? item) {
+                              setState(() {
+                                _clienteSeleccionado = item;
+                              });
+                            },
+                            // Configuración de la ventana de búsqueda (Menú desplegable)
+                            popupProps: PopupProps.menu(
+                              showSearchBox: true,
+                              searchFieldProps: const TextFieldProps(
+                                decoration: mui.InputDecoration(
+                                  hintText: "Buscar cliente...",
+                                  prefixIcon: Icon(Icons.search),
+                                ),
+                              ),
+                              // Mensaje por si busca un cliente que no existe
+                              emptyBuilder: (context, searchEntry) => Center(
+                                child: Text('No se encontró a "$searchEntry"'),
                               ),
                             ),
-                            // Mensaje por si busca un cliente que no existe
-                            emptyBuilder: (context, searchEntry) => Center(
-                              child: Text('No se encontró a "$searchEntry"'),
-                            ),
-                          ),
-                          // Configuración visual del botón principal
-                          decoratorProps: DropDownDecoratorProps(
-                            decoration: mui.InputDecoration(
-                              labelText: 'Cliente seleccionado',
-                              prefixIcon: Icon(
-                                Icons.person_search_rounded,
-                                color: theme.colorScheme.primary,
+                            // Configuración visual del botón principal
+                            decoratorProps: DropDownDecoratorProps(
+                              decoration: mui.InputDecoration(
+                                labelText: 'Cliente seleccionado',
+                                prefixIcon: Icon(
+                                  Icons.person_search_rounded,
+                                  color: theme.colorScheme.primary,
+                                ),
                               ),
                             ),
                           ),
@@ -624,24 +657,9 @@ class _EditarPedidoPageState extends State<EditarPedidoPage> {
     );
   }
 
-  Future<List<Producto>> futureProductos() async {
-    await Future.delayed(const Duration(seconds: 2));
-    return [
-      Producto(id: '1', nombre: 'Producto 1', precio: 135060, imagen: ''),
-      Producto(id: '2', nombre: 'Producto 2', precio: 250000, imagen: ''),
-      Producto(id: '3', nombre: 'Producto 3', precio: 5862000, imagen: ''),
-    ];
-  }
-
-  Stream<List<Producto>> getProductos() async* {
-    yield await futureProductos();
-  }
-
   // --- MODAL PARA AGREGAR PRODUCTOS ---
   void _mostrarSelectorProductos(Responsive responsive, ThemeData theme) {
     FocusScope.of(context).unfocus();
-
-    final streamAislado = getProductos();
 
     showModalBottomSheet(
       context: context,
@@ -652,8 +670,16 @@ class _EditarPedidoPageState extends State<EditarPedidoPage> {
         maxChildSize: 0.9,
         expand: false,
         builder: (_, controller) => StreamBuilder<List<Producto>>(
-          stream: streamAislado,
+          stream: _productosStream,
           builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Center(
+                child: Text('Error al cargar productos: ${snapshot.error}'),
+              );
+            }
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
             final productos = snapshot.data ?? [];
             return Column(
               children: [
@@ -702,7 +728,6 @@ class _EditarPedidoPageState extends State<EditarPedidoPage> {
                     ),
                     onPressed: () async {
                       await Navigator.pushNamed(context, '/nuevo_producto');
-                      setState(() {});
                     },
                     icon: const Icon(Icons.add_circle_outline),
                     label: const Text(
