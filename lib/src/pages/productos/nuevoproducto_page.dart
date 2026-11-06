@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../utils/responsive.dart';
 import '../../database/manejador_productos.dart';
+
 import 'package:provider/provider.dart';
 
 class NuevoProductoPage extends StatefulWidget {
@@ -29,6 +30,7 @@ class _NuevoProductoPageState extends State<NuevoProductoPage> {
     super.dispose();
   }
 
+  // Permite abrir la cámara o galería, comprime la imagen un poco y la muestra inmediatamente por setState.
   Future<void> _seleccionarImagen(ImageSource origen) async {
     final picker = ImagePicker();
     try {
@@ -82,8 +84,10 @@ class _NuevoProductoPageState extends State<NuevoProductoPage> {
   }
 
   Future<void> _guardarProducto() async {
+    // Valida los campos del formulario
     if (!_formKey.currentState!.validate()) return;
 
+    // Valida que se haya seleccionado una imagen
     if (_imagenSeleccionada == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -94,6 +98,7 @@ class _NuevoProductoPageState extends State<NuevoProductoPage> {
       return;
     }
 
+    // Muestra el indicador de progreso de guardar y bloquea clicks duplicados
     setState(() => _isLoading = true);
 
     try {

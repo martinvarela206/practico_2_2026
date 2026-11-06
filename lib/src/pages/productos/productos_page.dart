@@ -29,12 +29,14 @@ class _ProductosPageState extends State<ProductosPage> {
   }
   */
 
-  // ✅ Conectar catalogo a la base de datos por medio del manejador
+  // ✅ Conectar catalogo a la base de datos por medio del manejador 
+  /* Obsoleto:
   final _manejador = ManejadorProductos();
 
   Stream<List<Producto>> getProductos() {
     return _manejador.listar();
   }
+  */
 
   // ---
 
@@ -46,7 +48,10 @@ class _ProductosPageState extends State<ProductosPage> {
       appBar: AppBar(title: const Text('Mis Productos'), elevation: 0),
       body: SafeArea(
         child: StreamBuilder<List<Producto>>(
-          //stream: getProductos(),
+          //stream: getProductos(), // Obsoleto
+          // StreamBuilder es el widget que se suscribe al Stream
+          // stream: Provider.of + .listar() permiten que la vista se quede 
+          // escuchando cambios, ya que dentro de listar() se encuentra watch().
           stream: Provider.of<ManejadorProductos>(context).listar(),
           builder: (context, asyncSnapshot) {
             if (asyncSnapshot.connectionState == ConnectionState.waiting) {
